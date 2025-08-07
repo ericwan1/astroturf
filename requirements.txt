@@ -1,2 +1,0 @@
-praw==7.7.1
-pandas
