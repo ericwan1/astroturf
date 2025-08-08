@@ -1,0 +1,4 @@
+praw
+chromadb
+python-dotenv
+requests
