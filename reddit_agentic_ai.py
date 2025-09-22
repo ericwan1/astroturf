@@ -125,11 +125,15 @@ class RedditAgenticAI:
             logging.error(f"Error generating comment: {e}")
             return ""
 
-    def submit_comment(self, comment: str):
+    def submit_comment(self, comment: str, post_id: str):
         """
         Submits a comment to a post.
         """
-        pass
+        try:
+            self.reddit.submission(id=post_id).reply(comment)
+        except Exception as e:
+            logging.error(f"Error submitting comment: {e}")
+            return False
 
     def generate_comment_to_post(self, post):
         """
@@ -150,7 +154,7 @@ class RedditAgenticAI:
             comment = self.generate_comment(post_analysis, subreddit_slang)
 
             # Step 4: Submit comment
-            self.submit_comment(comment)
+            self.submit_comment(comment, post.id)
         except Exception as e:
             logging.error(f"Error generating comment to post: {e}")
             return None
