@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -400,7 +401,8 @@ def store_corpus_snapshot(
     post_limit,
     comment_listing_specs,
     max_comment_posts,
-    replace_more_limit
+    replace_more_limit,
+    comment_delay_seconds
 ):
     """Scrape post snapshots and selected comment trees into SQLite."""
     scraped_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
@@ -441,6 +443,13 @@ def store_corpus_snapshot(
             f"Scraping comments for post {index}/{len(comment_posts)}: "
             f"{submission.id}"
         )
+        if index > 1 and comment_delay_seconds > 0:
+            logging.info(
+                f"Sleeping {comment_delay_seconds} seconds before next "
+                "comment scrape"
+            )
+            time.sleep(comment_delay_seconds)
+
         try:
             post_comment_count = scrape_comments_for_post(
                 conn,
@@ -483,7 +492,7 @@ def parse_args():
     parser.add_argument(
         "--post-limit",
         type=int,
-        default=100,
+        default=25,
         help="Post limit per listing"
     )
     parser.add_argument(
@@ -498,14 +507,20 @@ def parse_args():
     parser.add_argument(
         "--max-comment-posts",
         type=int,
-        default=50,
+        default=25,
         help="Maximum number of posts to fetch comments for"
     )
     parser.add_argument(
         "--replace-more-limit",
         type=int,
-        default=16,
+        default=0,
         help="PRAW replace_more limit for each comment tree"
+    )
+    parser.add_argument(
+        "--comment-delay-seconds",
+        type=float,
+        default=10,
+        help="Seconds to sleep between comment-tree fetches"
     )
     return parser.parse_args()
 
@@ -541,7 +556,8 @@ def main():
         args.post_limit,
         comment_listing_specs,
         args.max_comment_posts,
-        args.replace_more_limit
+        args.replace_more_limit,
+        args.comment_delay_seconds
     )
 
     logging.info("Scraping completed successfully!")

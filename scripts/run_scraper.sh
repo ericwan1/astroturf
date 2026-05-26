@@ -13,7 +13,8 @@ LISTINGS="${LISTINGS:-new,hot,rising,top:day}"
 POST_LIMIT="${POST_LIMIT:-25}"
 COMMENT_LISTINGS="${COMMENT_LISTINGS:-hot,rising,top:day}"
 MAX_COMMENT_POSTS="${MAX_COMMENT_POSTS:-25}"
-REPLACE_MORE_LIMIT="${REPLACE_MORE_LIMIT:-8}"
+REPLACE_MORE_LIMIT="${REPLACE_MORE_LIMIT:-0}"
+COMMENT_DELAY_SECONDS="${COMMENT_DELAY_SECONDS:-10}"
 
 mkdir -p "${LOG_DIR}" "$(dirname "${DB_PATH}")"
 
@@ -27,6 +28,7 @@ mkdir -p "${LOG_DIR}" "$(dirname "${DB_PATH}")"
   echo "comment_listings=${COMMENT_LISTINGS}"
   echo "max_comment_posts=${MAX_COMMENT_POSTS}"
   echo "replace_more_limit=${REPLACE_MORE_LIMIT}"
+  echo "comment_delay_seconds=${COMMENT_DELAY_SECONDS}"
   echo "------------------------------------------------------------"
 } >> "${LOG_FILE}"
 
@@ -41,7 +43,8 @@ cd "${REPO_DIR}" || {
   --post-limit "${POST_LIMIT}" \
   --comment-listings "${COMMENT_LISTINGS}" \
   --max-comment-posts "${MAX_COMMENT_POSTS}" \
-  --replace-more-limit "${REPLACE_MORE_LIMIT}" >> "${LOG_FILE}" 2>&1
+  --replace-more-limit "${REPLACE_MORE_LIMIT}" \
+  --comment-delay-seconds "${COMMENT_DELAY_SECONDS}" >> "${LOG_FILE}" 2>&1
 
 EXIT_CODE=$?
 
