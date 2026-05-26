@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -u
 
-REPO_DIR="/Users/ericwan/Desktop/astroturf"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PYTHON_BIN="${REPO_DIR}/.venv/bin/python"
 SCRAPER="${REPO_DIR}/subreddit_scraper.py"
 LOG_DIR="${REPO_DIR}/logs"
