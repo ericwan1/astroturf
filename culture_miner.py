@@ -30,13 +30,41 @@ STOPWORDS = {
 
 TOKEN_RE = re.compile(r"[a-z0-9']+")
 URL_RE = re.compile(r"https?://\S+|www\.\S+")
-REDDIT_BOILERPLATE_RE = re.compile(r"\[(?:removed|deleted)\]", re.I)
+REDDIT_BOILERPLATE_RE = re.compile(
+    r"\[(?:removed|deleted)\]|"
+    r"(?:comment|post)\s+(?:removed|deleted)(?:\s+by\s+reddit)?",
+    re.I,
+)
+
+NOISY_LANGUAGE_TERMS = {
+    "reddit", "removed", "deleted", "http", "https", "www", "com", "org",
+}
+
+NOISY_PHRASES = {
+    "removed reddit",
+    "post history",
+    "hidden post",
+    "hidden post history",
+    "comment removed",
+    "post removed",
+}
 
 
 def clean_text_for_language(text: str) -> str:
     text = URL_RE.sub(" ", text)
     text = REDDIT_BOILERPLATE_RE.sub(" ", text)
     return " ".join(text.split())
+
+
+def is_noisy_language_item(tokens: tuple[str, ...] | list[str]) -> bool:
+    phrase = " ".join(tokens)
+    if phrase in NOISY_PHRASES:
+        return True
+    if any(token in NOISY_LANGUAGE_TERMS for token in tokens):
+        return True
+    return False
+
+
 POSTING_SUFFIX_RE = re.compile(r"\b([a-z0-9'-]{3,})(posting|maxxing|maxxed|maxx)\b", re.I)
 QUOTED_RE = re.compile(
     r'"([^"]{2,80})"|\'([^\']{2,80})\'|\u201c([^\u201d]{2,80})\u201d'
@@ -107,8 +135,8 @@ def top_ngrams(texts: list[str], n: int, top_k: int = 25, min_count: int = 2) ->
     counter: Counter[tuple[str, ...]] = Counter()
     for text in texts:
         grams = ngrams(content_tokens(clean_text_for_language(text)), n)
-        counter.update(set(grams))
-    ranked = counter.most_common(top_k * 3)
+        counter.update({gram for gram in grams if not is_noisy_language_item(gram)})
+    ranked = counter.most_common(top_k * 5)
     results = []
     for gram, count in ranked:
         if count < min_count:
@@ -122,12 +150,17 @@ def top_ngrams(texts: list[str], n: int, top_k: int = 25, min_count: int = 2) ->
 def top_terms(texts: list[str], top_k: int = 40, min_count: int = 3) -> list[dict[str, Any]]:
     counter: Counter[str] = Counter()
     for text in texts:
-        counter.update(set(content_tokens(clean_text_for_language(text))))
+        tokens = {
+            token
+            for token in content_tokens(clean_text_for_language(text))
+            if token not in NOISY_LANGUAGE_TERMS
+        }
+        counter.update(tokens)
     return [
         {"term": term, "doc_count": count}
-        for term, count in counter.most_common(top_k)
+        for term, count in counter.most_common(top_k * 3)
         if count >= min_count
-    ]
+    ][:top_k]
 
 
 def extract_posting_patterns(texts: list[str], top_k: int = 20) -> list[dict[str, Any]]:
@@ -326,31 +359,70 @@ def sample_titles_by_label(posts: list[sqlite3.Row], per_label: int = 5) -> dict
     return dict(buckets)
 
 
+def comment_to_exemplar(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "reddit_id": row["reddit_id"],
+        "post_reddit_id": row["post_reddit_id"],
+        "score": row["score"],
+        "depth": row["depth"],
+        "body": row["body"],
+    }
+
+
 def select_exemplars(
     comments: list[sqlite3.Row],
     *,
     top_k: int = 10,
-    tiers: tuple[tuple[str, int], ...] = (
-        ("high", 50),
-        ("medium", 20),
-        ("baseline", 5),
-    ),
+    high_min_score: int = 50,
+    max_depth: int = 2,
 ) -> dict[str, list[dict[str, Any]]]:
-    exemplars: dict[str, list[dict[str, Any]]] = {}
-    for label, min_score in tiers:
-        tier_rows = [row for row in comments if row["score"] >= min_score]
-        tier_rows.sort(key=lambda row: (row["score"], len(row["body"])), reverse=True)
-        exemplars[label] = [
-            {
-                "reddit_id": row["reddit_id"],
-                "post_reddit_id": row["post_reddit_id"],
-                "score": row["score"],
-                "depth": row["depth"],
-                "body": row["body"],
-            }
-            for row in tier_rows[:top_k]
-        ]
-    return exemplars
+    """
+    Return two exemplar sets:
+    - high: top-scored comments for peak subreddit humor
+    - median: typical comments near the corpus median length/score band
+    """
+    if not comments:
+        return {"high": [], "median": []}
+
+    scores = [float(row["score"]) for row in comments]
+    lengths = [float(len(row["body"])) for row in comments]
+    score_p25 = percentile(scores, 0.25) or 1.0
+    score_p75 = percentile(scores, 0.75) or 20.0
+    score_median = percentile(scores, 0.5) or 5.0
+    length_p25 = percentile(lengths, 0.25) or 40.0
+    length_p75 = percentile(lengths, 0.75) or 185.0
+    length_median = percentile(lengths, 0.5) or 84.0
+
+    high_rows = [row for row in comments if row["score"] >= high_min_score]
+    high_rows.sort(key=lambda row: row["score"], reverse=True)
+
+    median_candidates = [
+        row for row in comments
+        if score_p25 <= row["score"] <= score_p75
+        and (row["depth"] or 0) <= max_depth
+        and length_p25 <= len(row["body"]) <= length_p75
+    ]
+    median_candidates.sort(
+        key=lambda row: (
+            abs(len(row["body"]) - length_median),
+            abs(row["score"] - score_median),
+        )
+    )
+
+    seen_posts: set[str] = set()
+    median_rows: list[sqlite3.Row] = []
+    for row in median_candidates:
+        if row["post_reddit_id"] in seen_posts:
+            continue
+        seen_posts.add(row["post_reddit_id"])
+        median_rows.append(row)
+        if len(median_rows) >= top_k:
+            break
+
+    return {
+        "high": [comment_to_exemplar(row) for row in high_rows[:top_k]],
+        "median": [comment_to_exemplar(row) for row in median_rows],
+    }
 
 
 def median_poster_profile(comments: list[sqlite3.Row]) -> dict[str, Any]:
@@ -505,6 +577,17 @@ def format_summary(features: dict[str, Any]) -> str:
     lines.extend(["", "title_style_labels", "------------------"])
     for label, count in features["title_style"]["label_counts"].items():
         lines.append(f"{label}={count}")
+
+    lines.extend(["", "median_exemplars", "----------------"])
+    median_exemplars = features["comment_exemplars"].get("median", [])
+    if median_exemplars:
+        for item in median_exemplars[:5]:
+            lines.append(
+                f"score={item['score']} depth={item['depth']} "
+                f"body={item['body'][:100]}"
+            )
+    else:
+        lines.append("(none)")
 
     lines.extend(["", "post_trajectories", "-----------------"])
     trajectories = features["post_trajectories"]
