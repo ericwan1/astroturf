@@ -1,35 +1,94 @@
 # Astroturf
 
-Astroturf is an experimental Reddit corpus and agent project. The long-term goal is to build an agent that can understand a specific subreddit’s language, recurring references, posting formats, and meta-discourse well enough to generate subreddit-native comments in a controlled/evaluated setting.
+Astroturf is an experimental Reddit corpus and agent project. The long-term goal is to build an agent that can understand a specific subreddit's language, recurring references, posting formats, and meta-discourse well enough to generate subreddit-native comments and eventually post/reply autonomously in a controlled, evaluated setting.
 
-The project is currently focused on the first milestone: collecting raw subreddit data over time. The current scraper stores timestamped post and comment snapshots so later systems can analyze how posts move across `new`, `hot`, `rising`, and `top`, and how community language evolves around them.
+The current target subreddit is **r/redscarepod**.
 
-## Current Files
+## Project status
 
-`subreddit_scraper.py` is the main corpus collection script. It uses PRAW to scrape a subreddit’s configured listings, deduplicates posts within a scrape run, stores raw post/comment snapshots in SQLite, and links comments back to the post snapshot they came from.
+| Milestone | Status |
+|---|---|
+| 1. Corpus collection + validation | Done — cron scraper + inspection running |
+| 2. Culture mining | Done — features JSON from SQLite corpus |
+| 3. Chroma retrieval index | Done — posts/comments indexed from SQLite |
+| 4. Generation + evaluation loop | In progress — dry-run generator wired to culture + Chroma + Ollama |
+| 5. Autonomous monitoring/posting agent | Not started — scaffold exists in `reddit_agentic_ai.py` |
 
-`scripts/run_scraper.sh` is the cron-friendly wrapper for the scraper. It sets conservative default scrape limits, writes run delimiters to `logs/subreddit_scraper.log`, and derives the repo path from the script location so it can run from any clone path.
+Latest corpus snapshot (local): ~750 unique posts, ~14.5k unique comments, 18 scrape runs.
 
-`scripts/inspect_corpus.py` inspects the SQLite corpus database. It reports high-level health metrics such as post/comment snapshot counts, recent scrape runs, latest run volume, multi-source posts, and top posts by score.
+## Current files
 
-`scripts/run_inspection.sh` is the cron-friendly wrapper for corpus inspection. It writes timestamped inspection output to `logs/corpus_inspection.log` so scheduled scraper runs can be checked against scheduled validation runs.
+### Data collection
 
-`chroma_utils.py` contains helpers for querying ChromaDB collections. This was part of the earlier vector-search prototype and will likely become useful again when we rebuild Chroma indexes from the SQLite corpus.
+- `subreddit_scraper.py` — scrapes post/comment snapshots into SQLite via PRAW
+- `scripts/run_scraper.sh` — cron wrapper → `logs/subreddit_scraper.log`
+- `scripts/inspect_corpus.py` — corpus health checks
+- `scripts/run_inspection.sh` — cron wrapper → `logs/corpus_inspection.log`
 
-`llm.py` contains a thin Ollama API wrapper. It is the starting point for local generation, but it is not yet wired into a full evaluated comment-generation loop.
+### Culture + retrieval
 
-`reddit_agentic_ai.py` is an early scaffold for an agent that analyzes posts, retrieves subreddit context, generates comments, and posts replies. It is not currently the active path; the corpus builder needs to mature before this layer becomes useful.
+- `culture_miner.py` — extracts median-poster profile, n-grams, exemplars, trajectories
+- `scripts/mine_culture.py` — CLI → `data/culture/{subreddit}_features.json`
+- `scripts/run_mine_culture.sh` — cron wrapper → `logs/culture_mining.log`
+- `corpus_indexer.py` — builds Chroma index from deduped SQLite corpus
+- `scripts/build_chroma_index.py` — CLI → `chroma_db/`
+- `scripts/run_build_chroma_index.sh` — cron wrapper → `logs/chroma_indexing.log`
+- `chroma_utils.py` — semantic retrieval helpers over Chroma collections
 
-`requirements.txt` lists the Python dependencies used by the current scripts. The main runtime dependency for data collection is PRAW, with `python-dotenv` used to load local Reddit credentials from `.env`.
+### Generation + agent
 
-## Next Steps
+- `llm.py` — thin Ollama `/api/chat` wrapper (local inference only)
+- `comment_generator.py` — builds prompts from culture features + Chroma retrieval, calls `llm.py`
+- `comment_evaluator.py` — scores generated comments against mined style constraints
+- `scripts/dry_run_generate.py` — generates comments for corpus posts locally (**no Reddit posting**)
+- `reddit_agentic_ai.py` — early live-agent scaffold (monitor → retrieve → generate → post). Uses `comment_generator.py`; posting should only happen after dry-run eval looks good.
 
-1. **Corpus builder validation:** Let the scheduled scraper and inspection jobs run for several cycles, then check that `data/corpus.sqlite` and the logs are growing as expected. Watch for auth errors, rate-limit behavior, duplicate volume, and whether the default scrape size is sufficient.
+### Other
 
-2. **Culture miner:** Build scripts that read from SQLite and extract subreddit-specific signals: common phrases, recurring n-grams, `-posting` patterns, high-score comment exemplars, post title formats, repeated references, and post trajectories from `new` into `hot` or `top`.
+- `requirements.txt` — Python dependencies
+- `.env` — Reddit credentials (not committed)
 
-3. **Derived retrieval index:** Rebuild ChromaDB from the SQLite corpus rather than scraping directly into Chroma. This should index posts/comments with useful metadata while keeping SQLite as the raw source of truth.
+## Typical pipeline
 
-4. **Generation and evaluation loop:** Create a dry-run agent that retrieves relevant context, uses mined culture features, generates candidate comments, and scores them before any live posting is considered.
+After scraper runs, refresh derived artifacts:
 
-5. **Automated tracking agent:** After culture mining and evaluation work, implement an agent that monitors posts/comments over time, tracks emerging references, and uses the corpus to reason about when and how subreddit-specific language changes.
+```bash
+scripts/run_mine_culture.sh
+scripts/run_build_chroma_index.sh
+```
+
+Dry-run comment generation (requires local Ollama):
+
+```bash
+.venv/bin/python scripts/dry_run_generate.py redscarepod \
+  --model deepseek-r1:1.5b \
+  --limit 2
+```
+
+## Architecture
+
+```
+SQLite corpus (source of truth)
+    ├── culture_miner → data/culture/*_features.json
+    └── corpus_indexer → chroma_db/
+
+dry_run_generate / reddit_agentic_ai
+    ├── load culture features
+    ├── query Chroma for similar comments
+    ├── llm.py (Ollama) → candidate comment
+    └── comment_evaluator → style score
+```
+
+## Next steps
+
+1. **Improve dry-run eval** — compare generated comments to real thread comments; tune prompts/model.
+2. **Monitoring loop** — watch `new`/`rising` for r/redscarepod without posting.
+3. **Safety gates** — rate limits, score thresholds, human review before live comments.
+4. **Live posting** — only after dry-run quality is acceptable.
+
+## Runtime data (gitignored)
+
+- `data/corpus.sqlite`
+- `data/culture/`
+- `chroma_db/`
+- `logs/`

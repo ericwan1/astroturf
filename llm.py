@@ -22,6 +22,7 @@ class LLMConfig:
     max_tokens: int = 256
     top_p: float = 0.9
     timeout_seconds: int = 120
+    think: Optional[bool] = False
 
 
 class LLMWrapper:
@@ -51,6 +52,8 @@ class LLMWrapper:
             "stream": False,
             "options": self._options(temperature, max_tokens),
         }
+        if self.config.think is not None:
+            payload["think"] = self.config.think
         data = self._post("/api/chat", payload)
         message = data.get("message") or {}
         return str(message.get("content", "")).strip()
