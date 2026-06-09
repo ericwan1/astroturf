@@ -37,11 +37,25 @@ Latest corpus snapshot (local): ~750 unique posts, ~14.5k unique comments, 18 sc
 
 ### Generation + agent
 
-- `llm.py` — thin Ollama `/api/chat` wrapper (local inference only)
+- `llm.py` — unified chat wrapper over pluggable providers
+- `llm_providers.py` — `ollama` (local) and `gemini` (Google API) backends
 - `comment_generator.py` — builds prompts from culture features + Chroma retrieval, calls `llm.py`
 - `comment_evaluator.py` — scores generated comments against mined style constraints
 - `scripts/dry_run_generate.py` — generates comments for corpus posts locally (**no Reddit posting**)
 - `reddit_agentic_ai.py` — early live-agent scaffold (monitor → retrieve → generate → post). Uses `comment_generator.py`; posting should only happen after dry-run eval looks good.
+
+LLM provider env vars:
+
+```bash
+# Local Ollama (default)
+export LLM_PROVIDER=ollama
+export OLLAMA_MODEL=deepseek-r1:1.5b
+
+# Google Gemini
+export LLM_PROVIDER=gemini
+export GEMINI_API_KEY=your-key
+export GEMINI_MODEL=gemini-2.5-flash-lite
+```
 
 ### Other
 
@@ -57,11 +71,20 @@ scripts/run_mine_culture.sh
 scripts/run_build_chroma_index.sh
 ```
 
-Dry-run comment generation (requires local Ollama):
+Dry-run comment generation (requires a configured LLM provider):
 
 ```bash
+# Local Ollama
 .venv/bin/python scripts/dry_run_generate.py redscarepod \
+  --provider ollama \
   --model deepseek-r1:1.5b \
+  --limit 2
+
+# Google Gemini
+export GEMINI_API_KEY=your-key
+.venv/bin/python scripts/dry_run_generate.py redscarepod \
+  --provider gemini \
+  --model gemini-2.5-flash-lite \
   --limit 2
 ```
 

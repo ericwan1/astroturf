@@ -84,9 +84,15 @@ def parse_args():
         help="ChromaDB path",
     )
     parser.add_argument(
+        "--provider",
+        choices=["ollama", "gemini"],
+        default=os.getenv("LLM_PROVIDER", "ollama"),
+        help="LLM provider backend",
+    )
+    parser.add_argument(
         "--model",
-        default=os.getenv("OLLAMA_MODEL", "deepseek-r1:1.5b"),
-        help="Ollama model name",
+        default=None,
+        help="Model name for the selected provider",
     )
     parser.add_argument(
         "--limit",
@@ -97,11 +103,21 @@ def parse_args():
     return parser.parse_args()
 
 
+def build_llm_config(args) -> LLMConfig:
+    config = LLMConfig.from_env(args.provider)
+    if args.model:
+        config.model = args.model
+    if args.provider == "ollama":
+        config.think = False
+    return config
+
+
 def main():
     args = parse_args()
     culture_path = args.culture.format(subreddit=args.subreddit)
     features = load_culture_features(culture_path)
-    llm = LLMWrapper(LLMConfig(model=args.model, think=False, max_tokens=512))
+    llm_config = build_llm_config(args)
+    llm = LLMWrapper(llm_config)
     generator = CommentGenerator(features, llm, chroma_db_path=args.chroma_db)
 
     conn = sqlite3.connect(args.db)
@@ -110,7 +126,8 @@ def main():
         raise SystemExit(f"No posts found for r/{args.subreddit} in {args.db}")
 
     print(f"subreddit=r/{args.subreddit}")
-    print(f"model={args.model}")
+    print(f"provider={llm_config.provider}")
+    print(f"model={llm_config.model}")
     print(f"posts={len(posts)}")
     print()
 

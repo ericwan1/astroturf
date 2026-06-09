@@ -1,41 +1,72 @@
-"""Thin wrapper for local Ollama inference."""
+"""Unified chat wrapper over local and cloud LLM providers."""
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
-import requests
+from llm_providers import ChatMessage, ProviderConfig, create_provider
 
-ChatMessage = dict[str, str]
+__all__ = ["ChatMessage", "LLMConfig", "LLMWrapper"]
 
 
 @dataclass
 class LLMConfig:
-    """Configuration for Ollama API calls."""
+    """Configuration for LLM calls."""
 
+    provider: str = "ollama"
     base_url: str = "http://localhost:11434"
     model: str = "llama3.2"
+    api_key: Optional[str] = None
     temperature: float = 0.8
     max_tokens: int = 256
     top_p: float = 0.9
     timeout_seconds: int = 120
     think: Optional[bool] = False
 
+    def to_provider_config(self) -> ProviderConfig:
+        return ProviderConfig(
+            provider=self.provider,
+            model=self.model,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            top_p=self.top_p,
+            timeout_seconds=self.timeout_seconds,
+            think=self.think,
+        )
+
+    @classmethod
+    def from_env(cls, provider: Optional[str] = None) -> "LLMConfig":
+        provider_config = ProviderConfig.from_env(provider)
+        return cls(
+            provider=provider_config.provider,
+            model=provider_config.model,
+            api_key=provider_config.api_key,
+            base_url=provider_config.base_url,
+            temperature=provider_config.temperature,
+            max_tokens=provider_config.max_tokens,
+            top_p=provider_config.top_p,
+            timeout_seconds=provider_config.timeout_seconds,
+            think=provider_config.think,
+        )
+
 
 class LLMWrapper:
     """
-    Local inference client for Ollama.
+    Chat wrapper used across Astroturf.
 
-    Prefer `chat()` for structured prompts (system + user + few-shot examples).
-    `generate()` and `generate_response()` remain for simple single-string prompts.
+    Supports:
+    - `ollama` for local inference
+    - `gemini` for Google Gemini API
     """
 
     def __init__(self, config: Optional[LLMConfig] = None):
         self.config = config or LLMConfig()
         self.logger = logging.getLogger(__name__)
+        self._provider = create_provider(self.config.to_provider_config())
 
     def chat(
         self,
@@ -45,18 +76,12 @@ class LLMWrapper:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
-        """Generate a response from a chat-style message list."""
-        payload = {
-            "model": model or self.config.model,
-            "messages": messages,
-            "stream": False,
-            "options": self._options(temperature, max_tokens),
-        }
-        if self.config.think is not None:
-            payload["think"] = self.config.think
-        data = self._post("/api/chat", payload)
-        message = data.get("message") or {}
-        return str(message.get("content", "")).strip()
+        return self._provider.chat(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
     def generate(
         self,
@@ -67,7 +92,6 @@ class LLMWrapper:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
-        """Generate from a single user prompt, optionally with a system message."""
         messages: list[ChatMessage] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -87,44 +111,11 @@ class LLMWrapper:
         max_tokens: Optional[int] = None,
         stream_output: bool = False,
     ) -> str:
-        """
-        Backward-compatible single-prompt generation.
-
-        `stream_output` is ignored; Ollama calls use non-streaming responses.
-        """
         if stream_output:
-            self.logger.warning("stream_output is not supported; using non-streaming chat")
+            self.logger.warning("stream_output is not supported")
         return self.generate(
             prompt,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
         )
-
-    def _options(
-        self,
-        temperature: Optional[float],
-        max_tokens: Optional[int],
-    ) -> dict[str, Any]:
-        return {
-            "temperature": self.config.temperature if temperature is None else temperature,
-            "num_predict": self.config.max_tokens if max_tokens is None else max_tokens,
-            "top_p": self.config.top_p,
-        }
-
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.config.base_url.rstrip('/')}{path}"
-        try:
-            response = requests.post(
-                url,
-                json=payload,
-                timeout=self.config.timeout_seconds,
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as exc:
-            self.logger.error("Ollama request failed: %s", exc)
-            raise
-        except json.JSONDecodeError as exc:
-            self.logger.error("Ollama returned invalid JSON: %s", exc)
-            raise
