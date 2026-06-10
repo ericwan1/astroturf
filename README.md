@@ -11,10 +11,10 @@ The current target subreddit is **r/redscarepod**.
 | 1. Corpus collection + validation | Done — cron scraper + inspection running |
 | 2. Culture mining | Done — features JSON from SQLite corpus |
 | 3. Chroma retrieval index | Done — posts/comments indexed from SQLite |
-| 4. Generation + evaluation loop | In progress — dry-run generator wired to culture + Chroma + Ollama |
-| 5. Autonomous monitoring/posting agent | Not started — scaffold exists in `reddit_agentic_ai.py` |
+| 4. Generation + evaluation loop | v1 done — dry-run wired to culture + Chroma + LLM; quality tuning ongoing |
+| 5. Autonomous monitoring/posting agent | Not started — scaffold in `reddit_agentic_ai.py` (`dry_run=True` by default) |
 
-Latest corpus snapshot (local): ~750 unique posts, ~14.5k unique comments, 18 scrape runs.
+Corpus size changes over time; run `scripts/inspect_corpus.py` for current counts.
 
 ## Current files
 
@@ -42,9 +42,9 @@ Latest corpus snapshot (local): ~750 unique posts, ~14.5k unique comments, 18 sc
 - `comment_generator.py` — builds prompts from culture features + Chroma retrieval, calls `llm.py`
 - `comment_evaluator.py` — scores generated comments against mined style constraints
 - `scripts/dry_run_generate.py` — generates comments for corpus posts locally (**no Reddit posting**)
-- `reddit_agentic_ai.py` — early live-agent scaffold (monitor → retrieve → generate → post). Uses `comment_generator.py`; posting should only happen after dry-run eval looks good.
+- `reddit_agentic_ai.py` — early live-agent scaffold. Uses `comment_generator.py` for retrieval + generation. **`dry_run=True` by default** — will not post to Reddit unless explicitly disabled.
 
-LLM provider env vars:
+LLM provider env vars (`LLMConfig.from_env()` is used by dry-run and the agent):
 
 ```bash
 # Local Ollama (default)
@@ -96,17 +96,20 @@ SQLite corpus (source of truth)
     └── corpus_indexer → chroma_db/
 
 dry_run_generate / reddit_agentic_ai
-    ├── load culture features
-    ├── query Chroma for similar comments
-    ├── llm.py (Ollama) → candidate comment
+    ├── comment_generator
+    │     ├── load culture features
+    │     └── query Chroma for similar comments
+    ├── llm.py (Ollama or Gemini) → candidate comment
     └── comment_evaluator → style score
+
+reddit_agentic_ai defaults to dry_run=True and skips Reddit posting.
 ```
 
 ## Next steps
 
 1. **Improve dry-run eval** — compare generated comments to real thread comments; tune prompts/model.
 2. **Monitoring loop** — watch `new`/`rising` for r/redscarepod without posting.
-3. **Safety gates** — rate limits, score thresholds, human review before live comments.
+3. **Safety gates** — rate limits, score thresholds, human review before live comments (`dry_run=False`).
 4. **Live posting** — only after dry-run quality is acceptable.
 
 ## Runtime data (gitignored)

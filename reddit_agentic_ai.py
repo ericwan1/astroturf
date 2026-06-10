@@ -5,8 +5,7 @@ from typing import List, Optional
 
 import praw
 
-from chroma_utils import ChromaQueryManager
-from comment_generator import CommentGenerator, load_culture_features
+from comment_generator import CommentGenerator, GenerationResult, load_culture_features
 from llm import LLMConfig, LLMWrapper
 
 
@@ -43,10 +42,12 @@ class RedditAgenticAI:
         llm_config: Optional[LLMConfig] = None,
         chroma_db_path: str = "./chroma_db",
         culture_features_path: Optional[str] = None,
+        *,
+        dry_run: bool = True,
     ):
         self.reddit_config = reddit_config
         self.chroma_db_path = chroma_db_path
-        self.chroma_query_manager = ChromaQueryManager(chroma_db_path=chroma_db_path)
+        self.dry_run = dry_run
 
         self.reddit = praw.Reddit(
             client_id=reddit_config.client_id,
@@ -56,7 +57,7 @@ class RedditAgenticAI:
             password=reddit_config.password,
         )
 
-        self.llm = LLMWrapper(llm_config)
+        self.llm = LLMWrapper(llm_config or LLMConfig.from_env())
         self.comment_generator = self._build_comment_generator(culture_features_path)
 
     def _build_comment_generator(
@@ -71,7 +72,13 @@ class RedditAgenticAI:
 
         if not path.exists():
             logging.warning("Culture features not found at %s; using minimal defaults", path)
-            culture_features = {"subreddit": "redscarepod", "median_poster_profile": {}, "comment_style": {}, "language": {}, "comment_exemplars": {}}
+            culture_features = {
+                "subreddit": "redscarepod",
+                "median_poster_profile": {},
+                "comment_style": {},
+                "language": {},
+                "comment_exemplars": {},
+            }
         else:
             culture_features = load_culture_features(path)
 
@@ -81,28 +88,13 @@ class RedditAgenticAI:
             chroma_db_path=self.chroma_db_path,
         )
 
-    def get_relevant_context(self, post, subreddit_name: str):
-        return self.chroma_query_manager.query_similar_content(
-            subreddit_name,
+    def get_relevant_context(self, post, subreddit_name: Optional[str] = None):
+        subreddit = subreddit_name or self.comment_generator.subreddit
+        return self.comment_generator.chroma.query_similar_content(
+            subreddit,
             f"{post.title} {post.selftext}",
             n_results=5,
         )
-
-    def get_subreddit_slang(self, subreddit_name: str, query_text: str = "") -> List[str]:
-        """Return retrieved comment snippets relevant to the current post/thread."""
-        results = self.chroma_query_manager.query_similar_content(
-            subreddit_name,
-            query_text or subreddit_name,
-            n_results=5,
-            filter_metadata={"type": "comment"},
-        )
-        documents = []
-        for item in results:
-            document = item.get("document") or ""
-            if document.startswith("Post:"):
-                document = document.split("\n\n", 1)[-1]
-            documents.append(document)
-        return documents
 
     def analyze_post_content(self, post) -> dict:
         return {
@@ -116,14 +108,17 @@ class RedditAgenticAI:
             "url": post.url,
         }
 
-    def generate_comment(self, post_analysis: dict, subreddit_slang: List[str]) -> str:
-        result = self.comment_generator.generate_for_post(
+    def generate_comment(self, post_analysis: dict) -> GenerationResult:
+        return self.comment_generator.generate_for_post(
             post_analysis["title"],
             post_analysis.get("content") or "",
         )
-        return result.comment
 
     def submit_comment(self, comment: str, post_id: str):
+        if self.dry_run:
+            logging.warning("Refusing to submit comment while dry_run=True")
+            return False
+
         try:
             self.reddit.submission(id=post_id).reply(comment)
             return True
@@ -131,15 +126,18 @@ class RedditAgenticAI:
             logging.error(f"Error submitting comment: {e}")
             return False
 
-    def generate_comment_to_post(self, post):
+    def generate_comment_to_post(self, post) -> Optional[GenerationResult]:
         try:
             post_analysis = self.analyze_post_content(post)
-            subreddit_slang = self.get_subreddit_slang(
-                post_analysis["subreddit"],
-                f"{post_analysis['title']} {post_analysis.get('content', '')}",
-            )
-            comment = self.generate_comment(post_analysis, subreddit_slang)
-            self.submit_comment(comment, post.id)
+            result = self.generate_comment(post_analysis)
+
+            if self.dry_run:
+                logging.info("dry_run generated comment for post %s: %s", post.id, result.comment)
+                return result
+
+            if self.submit_comment(result.comment, post.id):
+                return result
+            return None
         except Exception as e:
             logging.error(f"Error generating comment to post: {e}")
             return None
