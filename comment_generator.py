@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from chroma_utils import ChromaQueryManager
 from comment_evaluator import evaluate_comment
+from config import DEFAULT_SUBREDDIT
 from llm import ChatMessage, LLMWrapper
 
 _THINK_OPEN = "<" + "think>"
@@ -64,7 +65,7 @@ def build_system_prompt(culture_features: dict[str, Any]) -> str:
 
     return "\n".join(
         [
-            f"You are emulating a typical r/{culture_features.get('subreddit', 'redscarepod')} commenter.",
+            f"You are emulating a typical r/{culture_features.get('subreddit', DEFAULT_SUBREDDIT)} commenter.",
             "Write one comment only. No preamble, no quotes around the comment, no explanation.",
             "",
             "Style constraints:",
@@ -140,7 +141,7 @@ class CommentGenerator:
     ):
         self.culture_features = culture_features
         self.llm = llm
-        self.subreddit = culture_features.get("subreddit", "redscarepod")
+        self.subreddit = culture_features.get("subreddit", DEFAULT_SUBREDDIT)
         self.chroma = ChromaQueryManager(chroma_db_path=chroma_db_path)
 
     def retrieve_similar_comments(

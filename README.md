@@ -2,7 +2,7 @@
 
 Astroturf is an experimental Reddit corpus and agent project. The long-term goal is to build an agent that can understand a specific subreddit's language, recurring references, posting formats, and meta-discourse well enough to generate subreddit-native comments and eventually post/reply autonomously in a controlled, evaluated setting.
 
-The current target subreddit is **r/redscarepod**.
+The current target subreddit is **r/redscarepod** (`config.DEFAULT_SUBREDDIT`). Override with the `SUBREDDIT` env var or a CLI/subreddit argument when targeting another community later.
 
 ## Project status
 
@@ -42,11 +42,14 @@ Corpus size changes over time; run `scripts/inspect_corpus.py` for current count
 - `comment_generator.py` — builds prompts from culture features + Chroma retrieval, calls `llm.py`
 - `comment_evaluator.py` — scores generated comments against mined style constraints
 - `scripts/dry_run_generate.py` — generates comments for corpus posts locally (**no Reddit posting**)
-- `reddit_agentic_ai.py` — early live-agent scaffold. Uses `comment_generator.py` for retrieval + generation. **`dry_run=True` by default** — will not post to Reddit unless explicitly disabled.
+- `reddit_agentic_ai.py` — early live-agent scaffold. Uses `comment_generator.py` for retrieval + generation. **`dry_run=True` by default** — will not post to Reddit unless explicitly disabled. Pass `subreddit=` (or set `SUBREDDIT`) to target a community; defaults to r/redscarepod.
 
 LLM provider env vars (`LLMConfig.from_env()` is used by dry-run and the agent):
 
 ```bash
+# Target subreddit (optional; default redscarepod — also used by run_*.sh cron wrappers)
+export SUBREDDIT=redscarepod
+
 # Local Ollama (default)
 export LLM_PROVIDER=ollama
 export OLLAMA_MODEL=deepseek-r1:1.5b
@@ -59,6 +62,7 @@ export GEMINI_MODEL=gemini-2.5-flash-lite
 
 ### Other
 
+- `config.py` — default subreddit (`redscarepod`), `SUBREDDIT` env override, culture path helpers
 - `requirements.txt` — Python dependencies
 - `.env` — Reddit credentials (not committed)
 

@@ -6,6 +6,7 @@ from typing import List, Optional
 import praw
 
 from comment_generator import CommentGenerator, GenerationResult, load_culture_features
+from config import culture_features_path as default_culture_features_path, resolve_subreddit
 from llm import LLMConfig, LLMWrapper
 
 
@@ -41,12 +42,14 @@ class RedditAgenticAI:
         reddit_config: RedditConfig,
         llm_config: Optional[LLMConfig] = None,
         chroma_db_path: str = "./chroma_db",
+        subreddit: Optional[str] = None,
         culture_features_path: Optional[str] = None,
         *,
         dry_run: bool = True,
     ):
         self.reddit_config = reddit_config
         self.chroma_db_path = chroma_db_path
+        self.subreddit = resolve_subreddit(subreddit)
         self.dry_run = dry_run
 
         self.reddit = praw.Reddit(
@@ -67,13 +70,12 @@ class RedditAgenticAI:
         if culture_features_path:
             path = Path(culture_features_path)
         else:
-            subreddit = "redscarepod"
-            path = Path(f"data/culture/{subreddit}_features.json")
+            path = default_culture_features_path(self.subreddit)
 
         if not path.exists():
             logging.warning("Culture features not found at %s; using minimal defaults", path)
             culture_features = {
-                "subreddit": "redscarepod",
+                "subreddit": self.subreddit,
                 "median_poster_profile": {},
                 "comment_style": {},
                 "language": {},

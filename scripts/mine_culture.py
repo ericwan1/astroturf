@@ -9,6 +9,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from culture_miner import format_summary, mine_culture
+from config import CULTURE_FEATURES_TEMPLATE, DEFAULT_SUBREDDIT, resolve_subreddit
 
 
 def parse_args():
@@ -18,8 +19,8 @@ def parse_args():
     parser.add_argument(
         "subreddit",
         nargs="?",
-        default="redscarepod",
-        help="Subreddit name without r/"
+        default=None,
+        help=f"Subreddit name without r/ (default: SUBREDDIT env or {DEFAULT_SUBREDDIT})",
     )
     parser.add_argument(
         "--db",
@@ -28,7 +29,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output",
-        default="data/culture/{subreddit}_features.json",
+        default=CULTURE_FEATURES_TEMPLATE,
         help="Output JSON path; {subreddit} is substituted when present"
     )
     parser.add_argument(
@@ -53,9 +54,10 @@ def parse_args():
 
 def main():
     args = parse_args()
+    subreddit = resolve_subreddit(args.subreddit)
     features = mine_culture(
         args.db,
-        args.subreddit,
+        subreddit,
         top_k=args.top_k,
         min_ngram_count=args.min_ngram_count,
     )
@@ -64,7 +66,7 @@ def main():
     if args.summary_only:
         return
 
-    output_path = Path(args.output.format(subreddit=args.subreddit))
+    output_path = Path(args.output.format(subreddit=subreddit))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(features, indent=2, ensure_ascii=False) + "\n")
     print(f"\nwrote_features={output_path}")

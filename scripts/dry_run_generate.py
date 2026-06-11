@@ -10,6 +10,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from comment_generator import CommentGenerator, load_culture_features
+from config import CULTURE_FEATURES_TEMPLATE, DEFAULT_SUBREDDIT, resolve_subreddit
 from llm import LLMConfig, LLMWrapper
 
 
@@ -65,8 +66,8 @@ def parse_args():
     parser.add_argument(
         "subreddit",
         nargs="?",
-        default="redscarepod",
-        help="Subreddit name without r/",
+        default=None,
+        help=f"Subreddit name without r/ (default: SUBREDDIT env or {DEFAULT_SUBREDDIT})",
     )
     parser.add_argument(
         "--db",
@@ -75,7 +76,7 @@ def parse_args():
     )
     parser.add_argument(
         "--culture",
-        default="data/culture/{subreddit}_features.json",
+        default=CULTURE_FEATURES_TEMPLATE,
         help="Culture features JSON path",
     )
     parser.add_argument(
@@ -114,18 +115,19 @@ def build_llm_config(args) -> LLMConfig:
 
 def main():
     args = parse_args()
-    culture_path = args.culture.format(subreddit=args.subreddit)
+    subreddit = resolve_subreddit(args.subreddit)
+    culture_path = args.culture.format(subreddit=subreddit)
     features = load_culture_features(culture_path)
     llm_config = build_llm_config(args)
     llm = LLMWrapper(llm_config)
     generator = CommentGenerator(features, llm, chroma_db_path=args.chroma_db)
 
     conn = sqlite3.connect(args.db)
-    posts = sample_posts(conn, args.subreddit, args.limit)
+    posts = sample_posts(conn, subreddit, args.limit)
     if not posts:
-        raise SystemExit(f"No posts found for r/{args.subreddit} in {args.db}")
+        raise SystemExit(f"No posts found for r/{subreddit} in {args.db}")
 
-    print(f"subreddit=r/{args.subreddit}")
+    print(f"subreddit=r/{subreddit}")
     print(f"provider={llm_config.provider}")
     print(f"model={llm_config.model}")
     print(f"posts={len(posts)}")

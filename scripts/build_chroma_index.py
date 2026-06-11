@@ -8,6 +8,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from corpus_indexer import build_chroma_index, format_index_summary
+from config import DEFAULT_SUBREDDIT, resolve_subreddit
 
 
 def parse_args():
@@ -17,8 +18,8 @@ def parse_args():
     parser.add_argument(
         "subreddit",
         nargs="?",
-        default="redscarepod",
-        help="Subreddit name without r/",
+        default=None,
+        help=f"Subreddit name without r/ (default: SUBREDDIT env or {DEFAULT_SUBREDDIT})",
     )
     parser.add_argument(
         "--db",
@@ -46,9 +47,10 @@ def parse_args():
 
 def main():
     args = parse_args()
+    subreddit = resolve_subreddit(args.subreddit)
     stats = build_chroma_index(
         args.db,
-        args.subreddit,
+        subreddit,
         chroma_db_path=args.chroma_db,
         rebuild=args.rebuild,
         batch_size=args.batch_size,
